@@ -25,97 +25,8 @@ namespace DreamTeamTask2
             new Server(80, 20);
         }
     }
-    public enum ActionType
-    {
-        Increment,
-        Decrement,
-        Flush
-    }
-    public struct ActionTypeStruct : IEquatable<ActionTypeStruct>
-    {
-        private readonly ActionType _type;
-
-        public ActionTypeStruct(ActionType type)
-        {
-            _type = type;
-        }
-
-        public ActionType Type
-        {
-            get { return _type; }
-        }
-
-        public bool Equals(ActionTypeStruct other)
-        {
-            return _type == other._type;
-        }
-    }
-    public interface IActionProcessor<ActionTypeStruct>
-        where ActionTypeStruct:IEquatable<ActionTypeStruct>
-    {
-        int MaxActionsCount { get; }
-        void RequestAction(ActionTypeStruct actionId);
-
-        event EventHandler<ActionTypeStruct> ProcessingAction;
-
-        event EventHandler<ActionTypeStruct> ProcessedAction;
-
-    }
-    public class ActionProcessor : IActionProcessor<ActionTypeStruct>
-    {
-        Server srv;
-        public ActionProcessor(Server srv, int maxActions)
-        {
-            this.srv = srv;
-            maxactionscount = maxActions;
-        }
-        private int maxactionscount;
-        public int MaxActionsCount { get { return maxactionscount; } }
-
-        public void RequestAction(ActionTypeStruct actionId)
-        {
-            //В начале и в конце мы инициируем события обработки и конца обработки
-            OnProcessingAction(actionId);
-            //Смотрим тип запрашиваемой операции и выполняем соответствующую операцию в классе Server
-            switch (actionId.Type)
-            {
-                case ActionType.Decrement:
-                    srv.DecValue();
-                    break;
-                case ActionType.Increment:
-                    srv.IncValue();
-                    break;
-                case ActionType.Flush:
-                    srv.ZeroValue();
-                    break;
-                default:
-                    break;
-            }
-            OnProcessedAction(actionId);
-        }
-        protected virtual void OnProcessingAction(ActionTypeStruct e)
-        {
-            EventHandler<ActionTypeStruct> handler = ProcessingAction;
-            if (handler != null)
-            {
-                handler(this, e);
-            }
-        }
-
-        protected virtual void OnProcessedAction(ActionTypeStruct e)
-        {
-            EventHandler<ActionTypeStruct> handler = ProcessedAction;
-            if (handler != null)
-            {
-                handler(this, e);
-            }
-        }
-        public event EventHandler<ActionTypeStruct> ProcessingAction;
-
-        public event EventHandler<ActionTypeStruct> ProcessedAction;
-    }
-
-
+    
+    
     class Server
     {
         TcpListener Listener; // Объект, принимающий TCP-клиентов
@@ -198,36 +109,15 @@ namespace DreamTeamTask2
             }
         }
     }
-    public interface IActionProcessor<ActionTypeStruc>
-	where ActionTypeStrucT : IEquatable<ActionTypeStrucT>
-    {
-        int MaxActionsCount { get; }
+    
 
-        void RequestAction(<ActionTypeStrucT> actionId);
+    
 
-        event EventHandler<ActionTypeStrucT> ProcessingAction;
-
-        event EventHandler<ActionResult<ActionTypeStrucT>> ProcessedAction;
-    }
-    public class ActionProcessor<TActionId>:IActionProcessor<TActionId>
-        where TActionId:IEquatable<TActionId>
-    {
-    public int MaxActionsCount{get;}
-
-    public void RequestAction(TActionId actionID)
-    {
- 	    string Request = Console.ReadLine();
-    }
-
-    public event EventHandler<ActionTypeStrucT> ProcessingAction;
-
-    public event EventHandler<ActionResult<ActionTypeStrucT>> ProcessedAction;
-    }
 
     // Класс-обработчик клиента
     class Client
     {
-        private Object thisLock = new Object();
+        //private Object thisLock = new Object();
         // Отправка страницы с ошибкой
        /* private void SendError(TcpClient Client, int Code)
         {
@@ -247,9 +137,108 @@ namespace DreamTeamTask2
         }
 
         */
+
+        public interface IActionProcessor<ActionTypeStruct>
+            where ActionTypeStruct : IEquatable<ActionTypeStruct>
+        {
+            int MaxActionsCount { get; }
+
+            void RequestAction(ActionTypeStruct actionId);
+
+            event EventHandler<ActionTypeStruct> ProcessingAction;
+
+            event EventHandler<ActionResult<ActionTypeStruct>> ProcessedAction;
+        }
+        public class ActionProcessor<TActionId> : IActionProcessor<TActionId>
+            where TActionId : IEquatable<TActionId>
+        {
+            private Object thislock = new Object();
+            public int MaxActionsCount { get; }
+            //Как то надо передать указатель на сервер для вызова его функций. Статическим полем в Client не хочется его делать
+            public void RequestAction(ActionTypeStruct actionID, Server srv)
+            {
+                string Request = Console.ReadLine();
+                //Впринципе lock не нужен, т.к. я реализовал последовательный вызов RequestAction.
+                lock (thislock)
+                {
+                    switch (actionID.Type)
+                    {
+                        case ActionType.Increment:
+                            srv.IncValue();
+                            break;
+                        case ActionType.Decrement:
+                            srv.DecValue();
+                            break;
+                        case ActionType.Flush:
+                            srv.ZeroValue();
+                            break;
+                        //Это не нужно,т.к. поступают уже проверенные команды
+                        default:
+                            throw new Exception("Incorrect incoming request");
+                            break;
+                    }
+                }
+            }
+
+
+            public event EventHandler<ActionTypeStruct> ProcessingAction;
+
+            public event EventHandler<ActionResult<ActionTypeStruct>> ProcessedAction;
+        }
+
+        public struct ActionResult<ActionTypeStruct>
+            where ActionTypeStruct : IEquatable<ActionTypeStruct>
+        {
+            private readonly ActionTypeStruct _identificator;
+            private readonly bool _result;
+
+            public ActionResult(ActionTypeStruct identificator, bool Result)
+            {
+                _identificator = identificator;
+                _result = Result;
+            }
+
+            public ActionTypeStruct Identificator
+            {
+                get { return _identificator; }
+            }
+
+            public bool Result
+            {
+                get { return _result; }
+            }
+        }
+        public enum ActionType
+        {
+            Increment,
+            Decrement,
+            Flush
+        }
+        public struct ActionTypeStruct : IEquatable<ActionTypeStruct>
+        {
+            private readonly ActionType _type;
+
+            public ActionTypeStruct(ActionType type)
+            {
+                _type = type;
+            }
+
+            public ActionType Type
+            {
+                get { return _type; }
+            }
+
+            public bool Equals(ActionTypeStruct other)
+            {
+                return _type == other._type;
+            }
+        }
+        Server srv;
+
         // Конструктор класса. Ему нужно передавать принятого клиента от TcpListener
         public Client(TcpClient client, Server srv)
         {
+            this.srv = srv; 
             // Объявим строку, в которой будет храниться запрос клиента
             string Request = "";
             // Буфер для хранения принятых от клиента данных
@@ -281,10 +270,6 @@ namespace DreamTeamTask2
             //Если количество запрошенных команд больше максимальо определённого то завершаем программу (по заданию)
             if (Actions.Length > ap.MaxActionsCount)
                 throw new Exception("Too many actions requested");
-            //Проверка на наличие одинаковых команд в запросе (см. Задание)
-            if (Actions.Distinct().ToArray<string>().Length != Actions.Length)
-                throw new Exception("There are repeated Actions");
-
             //Проверяем соответствие полученных команд командам обрабатываемым сервером. Обрабатываемые команды описаны в enum ActionType
             IEnumerable<ActionType> values = Enum.GetValues(typeof(ActionType)).Cast<ActionType>();
             //Для каждой команды определяем её в списке команд (ActionID)
@@ -311,7 +296,7 @@ namespace DreamTeamTask2
                     throw new Exception("Incorrect query");
                 else{
                     //Тут вызываем выполнение ActionID команды
-                    ap.RequestAction(new ActionTypeStruct(ActionID));
+                    ap.RequestAction(new ActionTypeStruct(ActionID), this.srv);
                 }
             }
             //Можно ещё синхронизировать работу каждого клиента. Но это по желанию. 
@@ -349,3 +334,4 @@ namespace DreamTeamTask2
         }
     }
 }
+*/
