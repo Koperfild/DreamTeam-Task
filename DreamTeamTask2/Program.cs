@@ -7,6 +7,7 @@ using System.Net;
 using System.Threading;
 using System.Text.RegularExpressions;
 using System.IO;
+using System.Xml.Serialization;
 
 namespace DreamTeamTask2
 {
@@ -25,11 +26,122 @@ namespace DreamTeamTask2
             new Server(80, 20);
         }
     }
+
+    public enum ActionType
+    {
+        Increment,
+        Decrement,
+        Flush
+    }
+    [Serializable]
+    public struct ActionTypeStruct : IEquatable<ActionTypeStruct>
+    {
+        private readonly ActionType _type;
+
+        public ActionTypeStruct(ActionType type)
+        {
+            _type = type;
+        }
+
+        public ActionType Type
+        {
+            get { return _type; }
+        }
+
+        public bool Equals(ActionTypeStruct other)
+        {
+            return _type == other._type;
+        }
+    }
+    public interface IActionProcessor<ActionTypeStruct>
+            where ActionTypeStruct : IEquatable<ActionTypeStruct>
+    {
+        int MaxActionsCount { get; }
+
+        void RequestAction(ActionTypeStruct actionId, Server srv);
+
+        event EventHandler<ActionTypeStruct> ProcessingAction;
+
+        event EventHandler<ActionResult<ActionTypeStruct>> ProcessedAction;
+    }
+    public class ActionProcessor<ActionTypeStruct> : IActionProcessor<ActionTypeStruct>
+        where ActionTypeStruct : IEquatable<ActionTypeStruct>
+    {
+
+        public int MaxActionsCount { get; }
+        //Как то надо передать указатель на сервер для вызова его функций. Статическим полем в Client не хочется его делать
+        public void RequestAction(ActionTypeStruct actionID)
+        {
+            OnProcessingAction(actionID);
+
+            //Создаём сокет
+            IPHostEntry ipHost = Dns.GetHostEntry("localhost");
+            IPAddress ipAddr = ipHost.AddressList[0];
+            //80 - порт сервера
+            IPEndPoint ipEndPoint = new IPEndPoint(ipAddr, 80);
+            Socket sender = new Socket(ipAddr.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+
+            // Соединяем сокет с удаленной точкой
+            sender.Connect(ipEndPoint);
+            XmlSerializer serializer = new XmlSerializer(typeof(ActionTypeStruct));
+            using (Stream netstream = new NetworkStream(sender))
+            {
+                serializer.Serialize(netstream, actionID);
+            }
+
+            OnProcessedAction(new ActionResult<ActionTypeStruct>(actionID, true));
+        }
+        protected virtual void OnProcessingAction(ActionTypeStruct e)
+        {
+            EventHandler<ActionTypeStruct> handler = ProcessingAction;
+            if (handler != null)
+            {
+                handler(this, e);
+            }
+        }
+        protected virtual void OnProcessedAction(ActionResult<ActionTypeStruct> e)
+        {
+            EventHandler<ActionResult<ActionTypeStruct>> handler = ProcessedAction;
+            if (handler != null)
+            {
+
+                handler(this, e);
+            }
+        }
+
+        public event EventHandler<ActionTypeStruct> ProcessingAction;
+
+        public event EventHandler<ActionResult<ActionTypeStruct>> ProcessedAction;
+    }
+
+    public struct ActionResult<ActionTypeStruct>
+        where ActionTypeStruct : IEquatable<ActionTypeStruct>
+    {
+        private readonly ActionTypeStruct _identificator;
+        private readonly bool _result;
+
+        public ActionResult(ActionTypeStruct identificator, bool Result)
+        {
+            _identificator = identificator;
+            _result = Result;
+        }
+
+        public ActionTypeStruct Identificator
+        {
+            get { return _identificator; }
+        }
+
+        public bool Result
+        {
+            get { return _result; }
+        }
+    }
     
     
     class Server
     {
-        TcpListener Listener; // Объект, принимающий TCP-клиентов
+        private Object thislock = new Object();
+        //TcpListener Listener; // Объект, принимающий TCP-клиентов
         int value; //Изменяемое TCP клиентами значение. В виде свойства не подходит,т.к. в Interlocked нужен ref int передавать.
         int N; //Ограничение макс значения value
 
@@ -71,42 +183,85 @@ namespace DreamTeamTask2
             IPEndPoint ipEndPoint = new IPEndPoint(ipAddr, 11000);
              */
             //Не знаю подходит ли IPAddress в конструкторе TcpListener
-            Listener = new TcpListener(IPAddress.Any, Port); // Создаем "слушателя" для указанного порта
-            Listener.Start(); // Запускаем его
+            //Listener = new TcpListener(IPAddress.Any, Port); // Создаем "слушателя" для указанного порта
+            //Listener.Start(); // Запускаем его
 
-            // В бесконечном цикле
-            while (true)
+            // Устанавливаем для сокета локальную конечную точку
+            IPHostEntry ipHost = Dns.GetHostEntry("localhost");
+            IPAddress ipAddr = ipHost.AddressList[0];
+            IPEndPoint ipEndPoint = new IPEndPoint(ipAddr, Port);
+
+            // Создаем сокет Tcp/Ip
+            Socket sListener = new Socket(ipAddr.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+
+            try
             {
-                // Принимаем новых клиентов. После того, как клиент был принят, он передается в новый поток (ClientThread)
-                // с использованием пула потоков.
-                ThreadPool.QueueUserWorkItem(
-                    state => 
-                    {
-                        try
+                sListener.Bind(ipEndPoint);
+                sListener.Listen(10);
+
+                // В бесконечном цикле
+                while (true)
+                {
+                    // Принимаем новых клиентов. После того, как клиент был принят, он передается в новый поток (ClientThread)
+                    // с использованием пула потоков.
+                    ThreadPool.QueueUserWorkItem(
+                        state =>
                         {
-                            ClientThread(state);//Listener.AcceptTcpClient());
-                        }
-                        catch(Exception e)
-                        {
-                            Console.WriteLine(e.Message);
-                        }
-                    }, 
-                    Listener.AcceptTcpClient());
+                            try
+                            {
+                                ConnectClient(state);//Listener.AcceptTcpClient());
+                            }
+                            catch (Exception e)
+                            {
+                                Console.WriteLine(e.Message);
+                            }
+                        },
+                        sListener.Accept()
+                        );
+                        // Listener.AcceptTcpClient());
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("error:{0}",e.Message);
             }
         }
-        private void ClientThread(Object StateInfo)
+        private void ConnectClient(Object StateInfo)
         {
             // Просто создаем новый экземпляр класса Client и передаем ему приведенный к классу TcpClient объект StateInfo
-            new Client((TcpClient)StateInfo, this);
-        }
-        ~Server()
-        {
-            // Если "слушатель" был создан
-            if (Listener != null)
+            //new Client((TcpClient)StateInfo, this);
+            Socket srvSocket = (Socket)StateInfo;
+            byte[] bytes = new byte[1024];
+            srvSocket.Receive(bytes);
+            ActionTypeStruct command;
+            XmlSerializer serializer = new XmlSerializer(typeof(ActionTypeStruct));
+            using (Stream netstream = new NetworkStream(srvSocket))
             {
-                // Остановим его
-                Listener.Stop();
+                command = (ActionTypeStruct)serializer.Deserialize(netstream);//.Serialize(netstream, actionID);
+            } 
+            lock (thislock)
+            {
+                switch (command.Type)
+                {
+                    case ActionType.Increment:
+                        IncValue();
+                        break;
+                    case ActionType.Decrement:
+                        DecValue();
+                        break;
+                    case ActionType.Flush:
+                        ZeroValue();
+                        break;
+                    //Это не нужно,т.к. поступают уже проверенные команды
+                    default:
+                        throw new Exception("Incorrect incoming request");
+                        break;
+                }
+                Console.WriteLine(command.Type.ToString() + " is made");
+                Console.WriteLine("N = {0}", N);
             }
+            srvSocket.Shutdown(SocketShutdown.Both);
+            srvSocket.Close();
         }
     }
     
@@ -137,102 +292,16 @@ namespace DreamTeamTask2
         }
 
         */
-
-        public interface IActionProcessor<ActionTypeStruct>
-            where ActionTypeStruct : IEquatable<ActionTypeStruct>
+        public void ProcessingActionFired(Object sender, ActionTypeStruct e)
         {
-            int MaxActionsCount { get; }
-
-            void RequestAction(ActionTypeStruct actionId);
-
-            event EventHandler<ActionTypeStruct> ProcessingAction;
-
-            event EventHandler<ActionResult<ActionTypeStruct>> ProcessedAction;
+            Console.WriteLine("Action" + e.Type.ToString() + " is processing");
         }
-        public class ActionProcessor<TActionId> : IActionProcessor<TActionId>
-            where TActionId : IEquatable<TActionId>
+        public void ProcessedAdctionFired(Object sender, ActionResult<ActionTypeStruct> e)
         {
-            private Object thislock = new Object();
-            public int MaxActionsCount { get; }
-            //Как то надо передать указатель на сервер для вызова его функций. Статическим полем в Client не хочется его делать
-            public void RequestAction(ActionTypeStruct actionID, Server srv)
-            {
-                string Request = Console.ReadLine();
-                //Впринципе lock не нужен, т.к. я реализовал последовательный вызов RequestAction.
-                lock (thislock)
-                {
-                    switch (actionID.Type)
-                    {
-                        case ActionType.Increment:
-                            srv.IncValue();
-                            break;
-                        case ActionType.Decrement:
-                            srv.DecValue();
-                            break;
-                        case ActionType.Flush:
-                            srv.ZeroValue();
-                            break;
-                        //Это не нужно,т.к. поступают уже проверенные команды
-                        default:
-                            throw new Exception("Incorrect incoming request");
-                            break;
-                    }
-                }
-            }
-
-
-            public event EventHandler<ActionTypeStruct> ProcessingAction;
-
-            public event EventHandler<ActionResult<ActionTypeStruct>> ProcessedAction;
+            Console.WriteLine("Action" + e.Identificator.Type.ToString() + " is processed");
         }
-
-        public struct ActionResult<ActionTypeStruct>
-            where ActionTypeStruct : IEquatable<ActionTypeStruct>
-        {
-            private readonly ActionTypeStruct _identificator;
-            private readonly bool _result;
-
-            public ActionResult(ActionTypeStruct identificator, bool Result)
-            {
-                _identificator = identificator;
-                _result = Result;
-            }
-
-            public ActionTypeStruct Identificator
-            {
-                get { return _identificator; }
-            }
-
-            public bool Result
-            {
-                get { return _result; }
-            }
-        }
-        public enum ActionType
-        {
-            Increment,
-            Decrement,
-            Flush
-        }
-        public struct ActionTypeStruct : IEquatable<ActionTypeStruct>
-        {
-            private readonly ActionType _type;
-
-            public ActionTypeStruct(ActionType type)
-            {
-                _type = type;
-            }
-
-            public ActionType Type
-            {
-                get { return _type; }
-            }
-
-            public bool Equals(ActionTypeStruct other)
-            {
-                return _type == other._type;
-            }
-        }
+        
+        
         Server srv;
 
         // Конструктор класса. Ему нужно передавать принятого клиента от TcpListener
@@ -240,6 +309,9 @@ namespace DreamTeamTask2
         {
             this.srv = srv; 
             // Объявим строку, в которой будет храниться запрос клиента
+            
+            
+
             string Request = "";
             // Буфер для хранения принятых от клиента данных
             byte[] Buffer = new byte[1024];
@@ -250,7 +322,7 @@ namespace DreamTeamTask2
             // Переменная для хранения количества байт, принятых от клиента
             int Count;
             // Читаем из потока клиента до тех пор, пока от него поступают данные
-            while ((Count = client.GetStream().Read(Buffer, 0, Buffer.Length)) > 0)
+            while ((Count = sender.Send( //client.GetStream().Read(Buffer, 0, Buffer.Length)) > 0)
             {
                 // Преобразуем эти данные в строку и добавим ее к переменной Request
                 Request += Encoding.ASCII.GetString(Buffer, 0, Count);
@@ -264,7 +336,7 @@ namespace DreamTeamTask2
                 }
             }
             
-            ActionProcessor ap = new ActionProcessor(srv, 2);
+            ActionProcessor ap = new ActionProcessor(srv);
             //Убираем все пробелы
             string[] Actions = Request.Split(new char[]{' ',',','\t','\n'}, StringSplitOptions.RemoveEmptyEntries);
             //Если количество запрошенных команд больше максимальо определённого то завершаем программу (по заданию)
