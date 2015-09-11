@@ -80,16 +80,33 @@ namespace DreamTeamTask2
             //80 - порт сервера
             IPEndPoint ipEndPoint = new IPEndPoint(ipAddr, 80);
             Socket sender = new Socket(ipAddr.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-
             // Соединяем сокет с удаленной точкой
             sender.Connect(ipEndPoint);
+            
+            //Отправляем команду на серверу
             XmlSerializer serializer = new XmlSerializer(typeof(ActionTypeStruct));
             using (Stream netstream = new NetworkStream(sender))
             {
                 serializer.Serialize(netstream, actionID);
             }
 
-            OnProcessedAction(new ActionResult<ActionTypeStruct>(actionID, true));
+            //Получаем результат от сервера
+            byte[] buffer = new byte[1024];
+            sender.Receive(buffer);
+            XmlSerializer deserializer = new XmlSerializer(typeof(ActionResult<ActionTypeStruct>));
+            ActionResult<ActionTypeStruct> result;
+            using (MemoryStream readstream = new MemoryStream(buffer))
+            {
+                result = (ActionResult<ActionTypeStruct>)deserializer.Deserialize(readstream);
+            }
+            
+            Console.WriteLine("Command " + result.Identificator.ToString() + " is "
+                + (result.Result ? "done" : "failed"));
+
+
+            sender.Shutdown(SocketShutdown.Both);
+            sender.Close();
+            OnProcessedAction(result);
         }
         protected virtual void OnProcessingAction(ActionTypeStruct e)
         {
@@ -114,6 +131,7 @@ namespace DreamTeamTask2
         public event EventHandler<ActionResult<ActionTypeStruct>> ProcessedAction;
     }
 
+    [Serializable]
     public struct ActionResult<ActionTypeStruct>
         where ActionTypeStruct : IEquatable<ActionTypeStruct>
     {
@@ -136,6 +154,13 @@ namespace DreamTeamTask2
             get { return _result; }
         }
     }
+    public class TooManyActionsException:Exception
+    {
+        public TooManyActionsException():base()
+        { }
+        public TooManyActionsException(string msg):base(msg)
+        { }
+    }
     
     
     class Server
@@ -145,30 +170,32 @@ namespace DreamTeamTask2
         int value; //Изменяемое TCP клиентами значение. В виде свойства не подходит,т.к. в Interlocked нужен ref int передавать.
         int N; //Ограничение макс значения value
 
-        public string IncValue()
+        //Можно сделать и public ActionResult<ActionTypeStruct IncValue() и др. функции. Но пока так
+        public bool IncValue()
         {
             //Interlocked.Increment(ref value);
             if (value <= N)
             {
                 value++;
-                return "200";
+                return true;
             }
-            else return "400";
+            else return false;
         }
-        public string DecValue()
+        public bool DecValue()
         {
             //Interlocked.Decrement(ref value);
             if (value >= 1)
             {
                 value--;
-                return "200";
+                return true;
             }
-            else return "400";
+            else return false;
         }
-        public string ZeroValue()
+        public bool ZeroValue()
         {
             //Interlocked.Exchange(ref value, 0);
-            return "200";
+            value = 0;
+            return true;
         }
         /// <summary>
         /// Создаёт сервер, принимающий все входящие IP адреса
@@ -178,13 +205,7 @@ namespace DreamTeamTask2
         public Server(int Port, int maxvalue)
         {
             N = maxvalue;
-            /*IPHostEntry ipHost = Dns.GetHostEntry("localhost");
-            IPAddress ipAddr = ipHost.AddressList[0];
-            IPEndPoint ipEndPoint = new IPEndPoint(ipAddr, 11000);
-             */
-            //Не знаю подходит ли IPAddress в конструкторе TcpListener
-            //Listener = new TcpListener(IPAddress.Any, Port); // Создаем "слушателя" для указанного порта
-            //Listener.Start(); // Запускаем его
+            
 
             // Устанавливаем для сокета локальную конечную точку
             IPHostEntry ipHost = Dns.GetHostEntry("localhost");
@@ -234,32 +255,43 @@ namespace DreamTeamTask2
             byte[] bytes = new byte[1024];
             srvSocket.Receive(bytes);
             ActionTypeStruct command;
-            XmlSerializer serializer = new XmlSerializer(typeof(ActionTypeStruct));
+            XmlSerializer deserializer = new XmlSerializer(typeof(ActionTypeStruct));
             using (Stream netstream = new NetworkStream(srvSocket))
             {
-                command = (ActionTypeStruct)serializer.Deserialize(netstream);//.Serialize(netstream, actionID);
-            } 
+                command = (ActionTypeStruct)deserializer.Deserialize(netstream);//.Serialize(netstream, actionID);
+            }
+            bool commandsucceed;
             lock (thislock)
             {
                 switch (command.Type)
                 {
                     case ActionType.Increment:
-                        IncValue();
+                        commandsucceed = IncValue();
                         break;
                     case ActionType.Decrement:
-                        DecValue();
+                        commandsucceed = DecValue();
                         break;
                     case ActionType.Flush:
-                        ZeroValue();
+                        commandsucceed = ZeroValue();
                         break;
                     //Это не нужно,т.к. поступают уже проверенные команды
                     default:
                         throw new Exception("Incorrect incoming request");
+                        commandsucceed = false;
                         break;
                 }
-                Console.WriteLine(command.Type.ToString() + " is made");
-                Console.WriteLine("N = {0}", N);
             }
+            Console.WriteLine(command.Type.ToString() + " is made");
+            Console.WriteLine("N = {0}", N);
+            
+            //Отправляем результат клиенту
+            ActionResult<ActionTypeStruct> result = new ActionResult<ActionTypeStruct>(command, commandsucceed);
+            XmlSerializer serializer = new XmlSerializer(typeof(ActionResult<ActionTypeStruct>));
+            using (Stream netstream = new NetworkStream(srvSocket))
+            {
+                serializer.Serialize(netstream, result);
+            }
+
             srvSocket.Shutdown(SocketShutdown.Both);
             srvSocket.Close();
         }
@@ -272,26 +304,6 @@ namespace DreamTeamTask2
     // Класс-обработчик клиента
     class Client
     {
-        //private Object thisLock = new Object();
-        // Отправка страницы с ошибкой
-       /* private void SendError(TcpClient Client, int Code)
-        {
-            // Получаем строку вида "200 OK"
-            // HttpStatusCode хранит в себе все статус-коды HTTP/1.1
-            string CodeStr = Code.ToString() + " " + ((HttpStatusCode)Code).ToString();
-            // Код простой HTML-странички
-            string Html = "<html><body><h1>" + CodeStr + "</h1></body></html>";
-            // Необходимые заголовки: ответ сервера, тип и длина содержимого. После двух пустых строк - само содержимое
-            string Str = "HTTP/1.1 " + CodeStr + "\nContent-type: text/html\nContent-Length:" + Html.Length.ToString() + "\n\n" + Html;
-            // Приведем строку к виду массива байт
-            byte[] Buffer = Encoding.ASCII.GetBytes(Str);
-            // Отправим его клиенту
-            Client.GetStream().Write(Buffer, 0, Buffer.Length);
-            // Закроем соединение
-            Client.Close();
-        }
-
-        */
         public void ProcessingActionFired(Object sender, ActionTypeStruct e)
         {
             Console.WriteLine("Action" + e.Type.ToString() + " is processing");
@@ -301,47 +313,25 @@ namespace DreamTeamTask2
             Console.WriteLine("Action" + e.Identificator.Type.ToString() + " is processed");
         }
         
-        
-        Server srv;
-
-        // Конструктор класса. Ему нужно передавать принятого клиента от TcpListener
-        public Client(TcpClient client, Server srv)
+        public Client()
         {
-            this.srv = srv; 
+            //this.srv = srv; 
             // Объявим строку, в которой будет храниться запрос клиента
             
+            Console.WriteLine("Input your query for server.\nIt can consist of commands separated by ',' ' '.' , new line or tab:\n");
+            Console.WriteLine("1)Increase");
+            Console.WriteLine("2)Decrease");
+            Console.WriteLine("3)Flush");
             
-
-            string Request = "";
-            // Буфер для хранения принятых от клиента данных
-            byte[] Buffer = new byte[1024];
-            
-            //Думать надо ли.
-            //Byte[] data = System.Text.Encoding.ASCII.GetBytes(message);
-            
-            // Переменная для хранения количества байт, принятых от клиента
-            int Count;
-            // Читаем из потока клиента до тех пор, пока от него поступают данные
-            while ((Count = sender.Send( //client.GetStream().Read(Buffer, 0, Buffer.Length)) > 0)
-            {
-                // Преобразуем эти данные в строку и добавим ее к переменной Request
-                Request += Encoding.ASCII.GetString(Buffer, 0, Count);
-                // Запрос должен обрываться последовательностью \r\n\r\n
-                // Либо обрываем прием данных сами, если длина строки Request превышает 4 килобайта
-                // Нам не нужно получать данные из POST-запроса (и т. п.), а обычный запрос
-                // по идее не должен быть больше 4 килобайт
-                if (Request.IndexOf("\r\n\r\n") >= 0 || Request.Length > 4096)
-                {
-                    break;
-                }
-            }
-            
-            ActionProcessor ap = new ActionProcessor(srv);
+            string Request = Console.ReadLine();
             //Убираем все пробелы
             string[] Actions = Request.Split(new char[]{' ',',','\t','\n'}, StringSplitOptions.RemoveEmptyEntries);
+            
+            ActionProcessor<ActionTypeStruct> ap = new ActionProcessor<ActionTypeStruct>();
             //Если количество запрошенных команд больше максимальо определённого то завершаем программу (по заданию)
             if (Actions.Length > ap.MaxActionsCount)
-                throw new Exception("Too many actions requested");
+                throw new TooManyActionsException("Too many actions requested");
+            
             //Проверяем соответствие полученных команд командам обрабатываемым сервером. Обрабатываемые команды описаны в enum ActionType
             IEnumerable<ActionType> values = Enum.GetValues(typeof(ActionType)).Cast<ActionType>();
             //Для каждой команды определяем её в списке команд (ActionID)
@@ -365,45 +355,13 @@ namespace DreamTeamTask2
                 }
                 //Если полученный запрос не соответстует никакой команде, то кидаем исключение
                 if (!CurrActiontypeFound)
-                    throw new Exception("Incorrect query");
+                    Environment.Exit(-1);
+                    //throw new Exception("Incorrect query");
                 else{
                     //Тут вызываем выполнение ActionID команды
-                    ap.RequestAction(new ActionTypeStruct(ActionID), this.srv);
+                    ap.RequestAction(new ActionTypeStruct(ActionID));
                 }
             }
-            //Можно ещё синхронизировать работу каждого клиента. Но это по желанию. 
-
-            client.Close();
         }
     }
 }
-
-
-/*
-            string.Compare(Request, )
-            string Reply;
-            lock (thisLock)
-            {
-                switch (Request)
-                {
-                    case "increment":
-                        Reply = srv.IncValue();
-                        break;
-                    case "decrement":
-                        Reply = srv.DecValue();
-                        break;
-                    case "zero":
-                        Reply = srv.ZeroValue();
-                        break;
-                    default:
-                        throw new Exception("Incorrect incoming request");
-                        break;
-                }
-            }
-            byte[] ReplyBuffer = Encoding.ASCII.GetBytes(Reply);
-            Client.GetStream().Write(ReplyBuffer, 0, ReplyBuffer.Length);
-            Client.Close();
-        }
-    }
-}
-*/
