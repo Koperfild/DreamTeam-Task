@@ -187,8 +187,8 @@ namespace DreamTeamTask2
             // Объявим строку, в которой будет храниться запрос клиента
             
             Console.WriteLine("Input your query for server.\nIt can consist of commands separated by ',' ' '.' , new line or tab:\n");
-            Console.WriteLine("1)Increase");
-            Console.WriteLine("2)Decrease");
+            Console.WriteLine("1)Increment");
+            Console.WriteLine("2)Decrement");
             Console.WriteLine("3)Flush");
             
             string Request = Console.ReadLine();
