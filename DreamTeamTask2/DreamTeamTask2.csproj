@@ -41,8 +41,12 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="ActionProcessor.cs" />
+    <Compile Include="ActionResult.cs" />
+    <Compile Include="ActionTypeStruct.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="TooManyActionsException.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
