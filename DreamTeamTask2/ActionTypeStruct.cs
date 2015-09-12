@@ -16,7 +16,6 @@ namespace DreamTeamTask2
     public struct ActionTypeStruct : IEquatable<ActionTypeStruct>
     {
         private readonly ActionType _type;
-
         public ActionTypeStruct(ActionType type)
         {
             _type = type;

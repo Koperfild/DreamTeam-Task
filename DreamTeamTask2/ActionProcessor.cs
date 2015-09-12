@@ -10,22 +10,57 @@ using System.Xml.Serialization;
 
 namespace DreamTeamTask2
 {
-    public interface IActionProcessor<ActionTypeStruct>
-            where ActionTypeStruct : IEquatable<ActionTypeStruct>
+    public interface IActionProcessor<T>
+            where T : IEquatable<ActionTypeStruct>
     {
         int MaxActionsCount { get; }
 
-        void RequestAction(ActionTypeStruct actionId);
+        void RequestAction(T actionId);
 
-        event EventHandler<ActionTypeStruct> ProcessingAction;
+        event EventHandler<T> ProcessingAction;
 
-        event EventHandler<ActionResult<ActionTypeStruct>> ProcessedAction;
+        event EventHandler<ActionResult<T>> ProcessedAction;
     }
-    public class ActionProcessor<ActionTypeStruct> : IActionProcessor<ActionTypeStruct>
-        where ActionTypeStruct : IEquatable<ActionTypeStruct>
+    public class ActionProcessor : IActionProcessor<ActionTypeStruct>
     {
+#region private Fields
         private int maxactionscount = 5;
-        public int MaxActionsCount { get{return maxactionscount;} }
+        public int MaxActionsCount { get { return maxactionscount; } }
+#endregion
+
+#region Methods
+        /// <summary>
+        /// Parse string containing commands and try to perform it
+        /// </summary>
+        /// <param name="Request"></param>
+        /// <exception cref="TooManyActionsException">If there are too many commands</exception>
+        public void PerformRequest(string Request)
+        {
+            
+
+            //del string Request = Console.ReadLine();
+            //Убираем все пробелы
+            string[] Actions = Request.Split(new char[] { ' ', ',', '\t', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            //Если количество запрошенных команд больше максимальо определённого то завершаем программу (по заданию)
+            if (Actions.Length > MaxActionsCount)
+                throw new TooManyActionsException("Too many actions requested");
+
+            // del ActionProcessor<ActionTypeStruct> ap = new ActionProcessor<ActionTypeStruct>();
+
+            foreach(string actionString in Actions)
+            {
+                ActionType action;
+                if (Enum.TryParse(actionString, out action))
+                {
+                    if (Enum.IsDefined(typeof(ActionType), action))
+                        RequestAction(new ActionTypeStruct(action));
+                }
+                else
+                    throw new Exception("Wrong command was asked: " + action.ToString());
+            }
+
+
+        }
         //Как то надо передать указатель на сервер для вызова его функций. Статическим полем в Client не хочется его делать
         public void RequestAction(ActionTypeStruct actionID)
         {
@@ -37,6 +72,7 @@ namespace DreamTeamTask2
             //80 - порт сервера
             IPEndPoint ipEndPoint = new IPEndPoint(ipAddr, 80);
             Socket sender = new Socket(ipAddr.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            sender.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, 1);
             // Соединяем сокет с удаленной точкой
             sender.Connect(ipEndPoint);
 
@@ -82,6 +118,7 @@ namespace DreamTeamTask2
                 handler(this, e);
             }
         }
+#endregion
 
         public event EventHandler<ActionTypeStruct> ProcessingAction;
 

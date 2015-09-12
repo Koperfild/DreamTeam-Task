@@ -7,19 +7,19 @@ using System.Threading.Tasks;
 namespace DreamTeamTask2
 {
     [Serializable]
-    public struct ActionResult<ActionTypeStruct>
-        where ActionTypeStruct : IEquatable<ActionTypeStruct>
+    public struct ActionResult<T>
+        where T : IEquatable<ActionTypeStruct>
     {
-        private readonly ActionTypeStruct _identificator;
+        private readonly T _identificator;
         private readonly bool _result;
 
-        public ActionResult(ActionTypeStruct identificator, bool Result)
+        public ActionResult(T identificator, bool Result)
         {
             _identificator = identificator;
             _result = Result;
         }
 
-        public ActionTypeStruct Identificator
+        public T Identificator
         {
             get { return _identificator; }
         }

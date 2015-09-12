@@ -23,7 +23,7 @@ namespace DreamTeamTask2
             // Установим минимальное количество рабочих потоков
             ThreadPool.SetMinThreads(2, 2);
             // Создадим новый сервер на порту 80
-            new Server(80, 20);
+            Server srv = new Server(80, 20);
             Console.ReadKey();
         }
     }
@@ -82,6 +82,7 @@ namespace DreamTeamTask2
 
             // Создаем сокет Tcp/Ip
             Socket sListener = new Socket(ipAddr.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            sListener.SetSocketOption(SocketOptionLevel.Socket,SocketOptionName.AcceptConnection, true);
 
             try
             {
@@ -123,7 +124,7 @@ namespace DreamTeamTask2
             byte[] bytes = new byte[1024];
             srvSocket.Receive(bytes);
             ActionTypeStruct command;
-            XmlSerializer deserializer = new XmlSerializer(typeof(ActionTypeStruct));
+            var deserializer = new XmlSerializer(typeof(ActionTypeStruct));
             using (Stream netstream = new NetworkStream(srvSocket))
             {
                 command = (ActionTypeStruct)deserializer.Deserialize(netstream);//.Serialize(netstream, actionID);
@@ -154,7 +155,7 @@ namespace DreamTeamTask2
             
             //Отправляем результат клиенту
             ActionResult<ActionTypeStruct> result = new ActionResult<ActionTypeStruct>(command, commandsucceed);
-            XmlSerializer serializer = new XmlSerializer(typeof(ActionResult<ActionTypeStruct>));
+            var serializer = new XmlSerializer(typeof(ActionResult<ActionTypeStruct>));
             using (Stream netstream = new NetworkStream(srvSocket))
             {
                 serializer.Serialize(netstream, result);
@@ -180,56 +181,31 @@ namespace DreamTeamTask2
         {
             Console.WriteLine("Action" + e.Identificator.Type.ToString() + " is processed");
         }
-        
+
         public Client()
         {
-            //this.srv = srv; 
-            // Объявим строку, в которой будет храниться запрос клиента
-            
-            Console.WriteLine("Input your query for server.\nIt can consist of commands separated by ',' ' '.' , new line or tab:\n");
+            //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            //Code to be inserted in Main(). When server and Client apps will be separated
+
+            Console.WriteLine(
+                "Input your query for server.\nIt can consist of commands separated by ',' ' '.' , new line or tab:\n");
             Console.WriteLine("1)Increment");
             Console.WriteLine("2)Decrement");
             Console.WriteLine("3)Flush");
-            
             string Request = Console.ReadLine();
-            //Убираем все пробелы
-            string[] Actions = Request.Split(new char[]{' ',',','\t','\n'}, StringSplitOptions.RemoveEmptyEntries);
-            
-            ActionProcessor<ActionTypeStruct> ap = new ActionProcessor<ActionTypeStruct>();
-            //Если количество запрошенных команд больше максимальо определённого то завершаем программу (по заданию)
-            if (Actions.Length > ap.MaxActionsCount)
-                throw new TooManyActionsException("Too many actions requested");
-            
-            //Проверяем соответствие полученных команд командам обрабатываемым сервером. Обрабатываемые команды описаны в enum ActionType
-            IEnumerable<ActionType> values = Enum.GetValues(typeof(ActionType)).Cast<ActionType>();
-            //Для каждой команды определяем её в списке команд (ActionID)
-            foreach(string action in Actions)
+            ActionProcessor ap = new ActionProcessor();
+            try
             {
-                //Присваиваем дефолтное значение. Далее оно обязательно меняется или не используется (выкидывается исключение)
-                ActionType ActionID = ActionType.Decrement;
-                bool CurrActiontypeFound = false;
-                //Проверяем есть ли полученный запрос в ActionType  
-                foreach(ActionType val in values)
-                {
-                    //приводим val к виду string, чтобы затем сравнить
-                    string valstring = val.ToString();
-                    //Если команда из запроса совпадает с ActionType командой, то
-                    if (string.Compare(action,valstring,true) == 0)
-                    {
-                        ActionID = val;
-                        CurrActiontypeFound = true;
-                        break;
-                    }
-                }
-                //Если полученный запрос не соответстует никакой команде, то кидаем исключение
-                if (!CurrActiontypeFound)
-                    Environment.Exit(-1);
-                    //throw new Exception("Incorrect query");
-                else{
-                    //Тут вызываем выполнение ActionID команды
-                    ap.RequestAction(new ActionTypeStruct(ActionID));
-                }
+                ap.PerformRequest(Request);
             }
+            catch (TooManyActionsException e)
+            {
+                Console.WriteLine(e.Message);
+            }
+
+            //End of Main() code
+
+
         }
     }
 }
