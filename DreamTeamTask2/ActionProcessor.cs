@@ -124,4 +124,27 @@ namespace DreamTeamTask2
 
         public event EventHandler<ActionResult<ActionTypeStruct>> ProcessedAction;
     }
+
+    public class Proxy : IActionProcessor<ActionTypeStruct>
+    {
+        private IActionProcessor<ActionTypeStruct> realActionProcessor; 
+        public int MaxActionsCount { get; private set; }
+        public void RequestAction(ActionTypeStruct actionId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Proxy(IActionProcessor<ActionTypeStruct> realActionProcessor)
+        {
+            this.realActionProcessor = realActionProcessor;
+        }
+
+        public bool GoodRequestAction()
+        {
+            
+        }
+
+        public event EventHandler<ActionTypeStruct> ProcessingAction;
+        public event EventHandler<ActionResult<ActionTypeStruct>> ProcessedAction;
+    }
 }

@@ -34,6 +34,7 @@ namespace DreamTeamTask2
     class Server
     {
         private Object thislock = new Object();
+        Socket srvSocket;
         //TcpListener Listener; // Объект, принимающий TCP-клиентов
         int value; //Изменяемое TCP клиентами значение. В виде свойства не подходит,т.к. в Interlocked нужен ref int передавать.
         int N; //Ограничение макс значения value
@@ -65,6 +66,7 @@ namespace DreamTeamTask2
             value = 0;
             return true;
         }
+
         /// <summary>
         /// Создаёт сервер, принимающий все входящие IP адреса
         /// </summary>
@@ -82,50 +84,54 @@ namespace DreamTeamTask2
 
             // Создаем сокет Tcp/Ip
             Socket sListener = new Socket(ipAddr.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-            sListener.SetSocketOption(SocketOptionLevel.Socket,SocketOptionName.AcceptConnection, true);
+            sListener.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.AcceptConnection, true);
 
             try
             {
                 sListener.Bind(ipEndPoint);
                 sListener.Listen(10);
-
-                // В бесконечном цикле
-                while (true)
-                {
-                    // Принимаем новых клиентов. После того, как клиент был принят, он передается в новый поток (ClientThread)
-                    // с использованием пула потоков.
-                    ThreadPool.QueueUserWorkItem(
-                        state =>
-                        {
-                            try
-                            {
-                                ConnectClient(state);//Listener.AcceptTcpClient());
-                            }
-                            catch (Exception e)
-                            {
-                                Console.WriteLine(e.Message);
-                            }
-                        },
-                        sListener.Accept()
-                        );
-                        // Listener.AcceptTcpClient());
-                }
             }
+            //Обработать различные исключения
             catch (Exception e)
             {
-                Console.WriteLine("error:{0}",e.Message);
+
             }
         }
-        private void ConnectClient(Object StateInfo)
+
+        public void AcceptClients()
+        {
+            // В бесконечном цикле
+            while (true)
+            {
+                // Принимаем новых клиентов. После того, как клиент был принят, он передается в новый поток (ClientThread)
+                // с использованием пула потоков.
+                ThreadPool.QueueUserWorkItem(
+                    clientSocket =>
+                    {
+                        try
+                        {
+                            ConnectClient((Socket)clientSocket); //Listener.AcceptTcpClient());
+                        }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine(e.Message);
+                        }
+                    },
+                    srvSocket.Accept()
+                    );
+                // Listener.AcceptTcpClient());
+            }
+        }
+
+        private void ConnectClient(Socket clientSocket)
         {
             // Просто создаем новый экземпляр класса Client и передаем ему приведенный к классу TcpClient объект StateInfo
             //new Client((TcpClient)StateInfo, this);
-            Socket srvSocket = (Socket)StateInfo;
             byte[] bytes = new byte[1024];
-            srvSocket.Receive(bytes);
+            clientSocket.Receive(bytes);
             ActionTypeStruct command;
             var deserializer = new XmlSerializer(typeof(ActionTypeStruct));
-            using (Stream netstream = new NetworkStream(srvSocket))
+            using (Stream netstream = new NetworkStream(clientSocket))
             {
                 command = (ActionTypeStruct)deserializer.Deserialize(netstream);//.Serialize(netstream, actionID);
             }
@@ -156,13 +162,13 @@ namespace DreamTeamTask2
             //Отправляем результат клиенту
             ActionResult<ActionTypeStruct> result = new ActionResult<ActionTypeStruct>(command, commandsucceed);
             var serializer = new XmlSerializer(typeof(ActionResult<ActionTypeStruct>));
-            using (Stream netstream = new NetworkStream(srvSocket))
+            using (Stream netstream = new NetworkStream(clientSocket))
             {
                 serializer.Serialize(netstream, result);
             }
 
-            srvSocket.Shutdown(SocketShutdown.Both);
-            srvSocket.Close();
+            clientSocket.Shutdown(SocketShutdown.Both);
+            clientSocket.Close();
         }
     }
     
