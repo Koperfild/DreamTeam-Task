@@ -31,7 +31,7 @@ namespace DreamTeamTask2
     
     
     
-    class Server
+    class  Server
     {
         private Object thislock = new Object();
         Socket srvSocket;

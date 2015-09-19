@@ -125,10 +125,10 @@ namespace DreamTeamTask2
         public event EventHandler<ActionResult<ActionTypeStruct>> ProcessedAction;
     }
 
-    public class Proxy : IActionProcessor<ActionTypeStruct>
+    public class Proxy //: IActionProcessor<ActionTypeStruct>
     {
-        private IActionProcessor<ActionTypeStruct> realActionProcessor; 
-        public int MaxActionsCount { get; private set; }
+        private IActionProcessor<ActionTypeStruct> realActionProcessor;
+        private int requestsCount;
         public void RequestAction(ActionTypeStruct actionId)
         {
             throw new NotImplementedException();
@@ -137,11 +137,26 @@ namespace DreamTeamTask2
         public Proxy(IActionProcessor<ActionTypeStruct> realActionProcessor)
         {
             this.realActionProcessor = realActionProcessor;
+            this.requestsCount = 0;
         }
 
-        public bool GoodRequestAction()
+        public bool GoodRequestAction(ActionTypeStruct action)
+        {
+            //Подписываемся на события
+            this.realActionProcessor.ProcessedAction += ActionProcessed;
+            this.realActionProcessor.ProcessingAction += ActionProcessing;
+            realActionProcessor.RequestAction(action);
+            this.requestsCount++;
+        }
+
+        public void ActionProcessed(object sender, ActionResult<ActionTypeStruct> e)
         {
             
+        }
+
+        public void ActionProcessing(object sender, ActionResult<ActionTypeStruct> e)
+        {
+
         }
 
         public event EventHandler<ActionTypeStruct> ProcessingAction;
